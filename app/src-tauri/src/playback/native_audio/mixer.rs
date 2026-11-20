@@ -145,6 +145,11 @@ impl Mixer {
         }
     }
 
+    /// Paused and faded out: render only produces silence.
+    pub fn silent(&self) -> bool {
+        !self.playing && self.envelope.value == 0.0
+    }
+
     pub fn configure(&mut self, fades: bool, crossfade_ms: u32) {
         self.fades = fades;
         self.crossfade_ms = crossfade_ms;

@@ -32,6 +32,9 @@ struct Session {
     output_failed: Arc<AtomicBool>,
     latency_ms: Arc<AtomicU64>,
     drained_at: Option<Instant>,
+    /// The device stream is paused while playback is paused, so the endpoint (e.g. a Bluetooth
+    /// headset) sees no audio and can switch to another source.
+    suspended: bool,
 }
 
 impl Drop for Session {
@@ -307,6 +310,14 @@ impl AudioEngine {
         self.control.playing = playing;
         self.control.volume = volume;
         if let Some(session) = &mut self.session {
+            if playing && session.suspended {
+                if let Some(stream) = &session.stream {
+                    stream
+                        .play()
+                        .map_err(|error| format!("恢复音频输出失败：{error}"))?;
+                }
+                session.suspended = false;
+            }
             session.mixer.lock().unwrap().intent(playing, volume as f32);
             session.drained_at = None;
         }
@@ -324,6 +335,13 @@ impl AudioEngine {
     pub fn poll(&mut self) -> Option<Feedback> {
         let session = self.session.as_mut()?;
         let mixer = session.mixer.lock().unwrap();
+        // Suspend only after the pause fade has reached silence.
+        if !session.suspended && mixer.silent() {
+            if let Some(stream) = &session.stream {
+                // A device that cannot pause keeps rendering silence, as before.
+                session.suspended = stream.pause().is_ok();
+            }
+        }
         let position_ms = mixer.current.position_ms();
         let duration_ms = mixer
             .current
@@ -457,6 +475,7 @@ impl AudioEngine {
             output_failed,
             latency_ms,
             drained_at: None,
+            suspended: false,
         });
         self.control.serial = self.control.serial.wrapping_add(1);
         self.last_sequence = 0;

@@ -292,6 +292,7 @@ fn cancelling_preload_preserves_a_promoted_transition_and_its_gain() {
         output_failed: Arc::new(AtomicBool::new(false)),
         latency_ms: Arc::new(AtomicU64::new(0)),
         drained_at: None,
+        suspended: false,
     });
     // The actor has already promoted the incoming voice, so control.next is empty.
     engine.cancel_prepared().unwrap();
@@ -317,6 +318,7 @@ fn output_failure_is_distinct_from_decode_failure_and_early_eof_waits_for_outgoi
         output_failed: failed.clone(),
         latency_ms: Arc::new(AtomicU64::new(0)),
         drained_at: None,
+        suspended: false,
     });
     assert_ne!(engine.poll().unwrap().kind, FeedbackKind::Ended);
     failed.store(true, Ordering::Release);
@@ -363,6 +365,7 @@ fn preload_reuses_decoded_pcm_and_poll_promotes_before_reporting_the_next_clock(
         output_failed: Arc::new(AtomicBool::new(false)),
         latency_ms: Arc::new(AtomicU64::new(0)),
         drained_at: None,
+        suspended: false,
     });
     engine.control.next = Some(NextSource {
         source: "next".into(),
@@ -600,4 +603,19 @@ fn decode_error_is_eof_only_after_the_declared_samples_are_decoded() {
         0,
         u64::MAX
     ));
+}
+
+#[test]
+fn mixer_is_silent_only_after_the_pause_fade() {
+    let mut mixer = Mixer::new(voice(1000, 2, 1000, 0, 0.8, 1000), true, 1.0, true, 0);
+    mixer.render(&mut [0.0f32; 600]); // fade-in to full gain
+    assert!(!mixer.silent());
+    mixer.intent(false, 1.0);
+    assert!(!mixer.silent(), "fade-out still running");
+    for _ in 0..20 {
+        mixer.render(&mut [0.0f32; 100]);
+    }
+    assert!(mixer.silent());
+    mixer.intent(true, 1.0);
+    assert!(!mixer.silent());
 }
